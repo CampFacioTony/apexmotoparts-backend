@@ -6,15 +6,16 @@ const realizarVenta = async (req, res) => {
     try {
         await client.query('BEGIN'); 
 
-        // ¡Ahora extraemos también los pagos desde Postman/Web!
-        const { articulos, pagos, canal_venta = 'MOSTRADOR_FISICO' } = req.body;
+        // Extraemos los nuevos campos opcionales
+        const { articulos, pagos, canal_venta = 'MOSTRADOR_FISICO', cliente_id, codigo_promocion } = req.body;
         const usuario_id = req.usuario.id;
-        
 
-        let totalVenta = 0;
+        let subtotal = 0;
+        let descuentoAplicado = 0;
         let totalPagado = 0;
+        let promocion_id = null;
 
-        // --- FASE 1: VERIFICACIÓN DEL CARRITO ---
+        // --- FASE 1: VERIFICACIÓN DEL CARRITO Y SUBTOTAL ---
         for (let art of articulos) {
             const prodRes = await client.query('SELECT precio_venta, stock_actual, nombre FROM productos WHERE id = $1', [art.producto_id]);
             if (prodRes.rowCount === 0) throw new Error(`El producto no existe`);
@@ -27,29 +28,57 @@ const realizarVenta = async (req, res) => {
                 throw new Error(`No hay suficientes piezas en ese pasillo/rack para: ${producto.nombre}`);
             }
 
-            totalVenta += parseFloat(producto.precio_venta) * art.cantidad;
+            subtotal += parseFloat(producto.precio_venta) * art.cantidad;
         }
 
-        // --- FASE 2: VERIFICACIÓN DE LOS PAGOS COMBINADOS ---
-        // Sumamos todo lo que el cliente nos está entregando (Efectivo + Tarjeta, etc)
+        // --- FASE 2: APLICAR PROMOCIÓN (SI EXISTE) ---
+        if (codigo_promocion) {
+            // Buscamos si el cupón es válido hoy
+            const promoRes = await client.query(`
+                SELECT id, tipo_descuento, valor_descuento 
+                FROM promociones 
+                WHERE codigo = $1 AND activo = true 
+                AND CURRENT_TIMESTAMP BETWEEN fecha_inicio AND fecha_fin
+            `, [codigo_promocion.toUpperCase()]);
+
+            if (promoRes.rowCount === 0) {
+                throw new Error('El código de promoción no existe, está inactivo o ya caducó');
+            }
+
+            const promo = promoRes.rows[0];
+            promocion_id = promo.id;
+
+            // Matemáticas del descuento
+            if (promo.tipo_descuento === 'PORCENTAJE') {
+                descuentoAplicado = subtotal * (parseFloat(promo.valor_descuento) / 100);
+            } else if (promo.tipo_descuento === 'MONTO_FIJO') {
+                descuentoAplicado = parseFloat(promo.valor_descuento);
+            }
+
+            // Evitamos que el descuento sea mayor al subtotal (que no te queden a deber)
+            if (descuentoAplicado > subtotal) descuentoAplicado = subtotal;
+        }
+
+        const totalVenta = subtotal - descuentoAplicado;
+
+        // --- FASE 3: VERIFICACIÓN DE PAGOS COMBINADOS ---
         for (let pago of pagos) {
             totalPagado += parseFloat(pago.monto);
         }
 
-        // Regla de Oro: Lo pagado debe cubrir el total de la venta
-        // Usamos Math.abs para evitar problemas de decimales mínimos (ej. 100.0000001 !== 100)
         if (Math.abs(totalPagado - totalVenta) > 0.01) {
-            throw new Error(`Los pagos no cuadran. El total a pagar es $${totalVenta} pero se están entregando $${totalPagado}`);
+            throw new Error(`Los pagos no cuadran. El total con descuento es $${totalVenta} pero se entregaron $${totalPagado}`);
         }
 
-        // --- FASE 3: EL TICKET GENERAL ---
+        // --- FASE 4: EL TICKET GENERAL (AHORA CON CLIENTE Y DESCUENTO) ---
         const ventaRes = await client.query(
-            'INSERT INTO ventas (usuario_id, total) VALUES ($1, $2) RETURNING id',
-            [usuario_id, totalVenta, canal_venta]
+            `INSERT INTO ventas (usuario_id, cliente_id, promocion_id, subtotal, descuento_aplicado, total, canal_venta) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+            [usuario_id, cliente_id, promocion_id, subtotal, descuentoAplicado, totalVenta, canal_venta]
         );
         const venta_id = ventaRes.rows[0].id;
 
-        // --- FASE 4: REGISTRAR LOS PAGOS COMBINADOS ---
+        // --- FASE 5: REGISTRAR PAGOS COMBINADOS ---
         for (let pago of pagos) {
             await client.query(
                 'INSERT INTO ventas_pagos (venta_id, metodo_pago, monto) VALUES ($1, $2, $3)',
@@ -57,7 +86,7 @@ const realizarVenta = async (req, res) => {
             );
         }
 
-        // --- FASE 5: DESCONTAR PIEZAS Y REGISTRAR MOVIMIENTOS ---
+        // --- FASE 6: DESCONTAR PIEZAS Y REGISTRAR MOVIMIENTOS ---
         for (let art of articulos) {
             const prodRes = await client.query('SELECT precio_venta FROM productos WHERE id = $1', [art.producto_id]);
             const precio = prodRes.rows[0].precio_venta;
@@ -81,9 +110,9 @@ const realizarVenta = async (req, res) => {
         res.status(201).json({ 
             status: 'success', 
             message: 'Venta cobrada exitosamente', 
-            ticket: venta_id, 
-            total_venta: totalVenta,
-            desglose_pagos: pagos // Le devolvemos el resumen de cómo pagó
+            ticket: venta_id,
+            resumen: { subtotal, descuento: descuentoAplicado, total_cobrado: totalVenta },
+            desglose_pagos: pagos
         });
 
     } catch (error) {
