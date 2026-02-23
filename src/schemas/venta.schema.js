@@ -14,7 +14,9 @@ const registrarVentaSchema = z.object({
             errorMap: () => ({ message: "Método de pago no válido" })
         }),
         monto: z.number().positive("El monto a pagar debe ser mayor a 0")
-    })).min(1, "Debe registrar al menos un método de pago")
+    })).min(1, "Debe registrar al menos un método de pago"),
+    canal_venta: z.enum(['MOSTRADOR_FISICO', 'WOOCOMMERCE', 'MERCADOLIBRE', 'AMAZON']).optional()
+    
 });
 
 module.exports = { registrarVentaSchema };

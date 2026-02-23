@@ -7,8 +7,9 @@ const realizarVenta = async (req, res) => {
         await client.query('BEGIN'); 
 
         // ¡Ahora extraemos también los pagos desde Postman/Web!
-        const { articulos, pagos } = req.body;
+        const { articulos, pagos, canal_venta = 'MOSTRADOR_FISICO' } = req.body;
         const usuario_id = req.usuario.id;
+        
 
         let totalVenta = 0;
         let totalPagado = 0;
@@ -44,7 +45,7 @@ const realizarVenta = async (req, res) => {
         // --- FASE 3: EL TICKET GENERAL ---
         const ventaRes = await client.query(
             'INSERT INTO ventas (usuario_id, total) VALUES ($1, $2) RETURNING id',
-            [usuario_id, totalVenta]
+            [usuario_id, totalVenta, canal_venta]
         );
         const venta_id = ventaRes.rows[0].id;
 
