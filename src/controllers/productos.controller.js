@@ -130,11 +130,51 @@ const eliminarProducto = async (req, res) => {
     }
 };
 
+// 5. NUEVA Función para SUBIR LA FOTO
+const subirImagenProducto = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Si Multer no encontró ningún archivo en la petición
+        if (!req.file) {
+            return res.status(400).json({ status: 'error', message: 'Por favor selecciona una imagen.' });
+        }
+
+        // Armamos la URL pública (ej. /uploads/productos/123-456.jpg)
+        const imagen_url = `/uploads/productos/${req.file.filename}`;
+
+        // Actualizamos la base de datos de tu refacción
+        const query = `
+            UPDATE productos 
+            SET imagen_url = $1, updated_at = CURRENT_TIMESTAMP 
+            WHERE id = $2 
+            RETURNING *;
+        `;
+        const result = await pool.query(query, [imagen_url, id]);
+
+        if (result.rowCount === 0) {
+            return res.status(404).json({ status: 'error', message: 'No se encontró la refacción' });
+        }
+
+        res.status(200).json({
+            status: 'success',
+            message: 'Imagen del producto guardada exitosamente',
+            imagen_url: imagen_url,
+            data: result.rows[0]
+        });
+
+    } catch (error) {
+        console.error('Error al subir imagen:', error);
+        res.status(500).json({ status: 'error', message: 'Error interno al procesar la imagen' });
+    }
+};
+
 // Exportamos las tres funciones
 module.exports = {
     getProductos,
     crearProducto,
     actualizarProducto,
-    eliminarProducto
+    eliminarProducto,
+    subirImagenProducto
 };
 
