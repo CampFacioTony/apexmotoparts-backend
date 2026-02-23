@@ -8,6 +8,7 @@ const compatibilidadRoutes = require('./routes/compatibilidad.routes');
 const almacenRoutes = require('./routes/almacen.routes');
 const usuariosRoutes = require('./routes/usuarios.routes');
 const ventasRoutes = require('./routes/ventas.routes');
+const reportesRoutes = require('./routes/reportes.routes');
 
 
 const app = express();
@@ -28,5 +29,7 @@ app.use('/api/compatibilidad', compatibilidadRoutes);
 app.use('/api/almacen', almacenRoutes);
 app.use('/api/usuarios', usuariosRoutes);
 app.use('/api/ventas', ventasRoutes);
+app.use('/api/reportes', reportesRoutes);
+
 
 module.exports = app;
