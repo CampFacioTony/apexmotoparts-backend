@@ -3,12 +3,15 @@ const pool = require('../config/db');
 const crearPromocion = async (req, res) => {
     try {
         const { codigo, descripcion, tipo_descuento, valor_descuento, fecha_inicio, fecha_fin } = req.body;
+        const usuario_id = req.usuario.id; // <-- Extraemos al empleado
+
         const query = `
-            INSERT INTO promociones (codigo, descripcion, tipo_descuento, valor_descuento, fecha_inicio, fecha_fin)
-            VALUES ($1, $2, $3, $4, $5, $6) RETURNING *;
+            INSERT INTO promociones (codigo, descripcion, tipo_descuento, valor_descuento, fecha_inicio, fecha_fin, creado_por)
+            VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *;
         `;
-        // Usamos .toUpperCase() para que los códigos siempre se guarden en MAYÚSCULAS
-        const result = await pool.query(query, [codigo.toUpperCase(), descripcion, tipo_descuento, valor_descuento, fecha_inicio, fecha_fin]);
+        
+        const result = await pool.query(query, [codigo.toUpperCase(), descripcion, tipo_descuento, valor_descuento, fecha_inicio, fecha_fin, usuario_id]);
+        
         res.status(201).json({ status: 'success', message: 'Promoción creada', data: result.rows[0] });
     } catch (error) {
         if (error.code === '23505') return res.status(409).json({ status: 'error', message: 'Este código de promoción ya existe' });

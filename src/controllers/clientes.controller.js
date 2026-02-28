@@ -3,11 +3,15 @@ const pool = require('../config/db');
 const crearCliente = async (req, res) => {
     try {
         const { nombre_completo, email, telefono, nivel_lealtad = 'BRONCE' } = req.body;
+        const usuario_id = req.usuario.id; // <-- Extraemos al empleado en turno
+
         const query = `
-            INSERT INTO clientes (nombre_completo, email, telefono, nivel_lealtad)
-            VALUES ($1, $2, $3, $4) RETURNING *;
+            INSERT INTO clientes (nombre_completo, email, telefono, nivel_lealtad, creado_por)
+            VALUES ($1, $2, $3, $4, $5) RETURNING *;
         `;
-        const result = await pool.query(query, [nombre_completo, email, telefono, nivel_lealtad]);
+        // Agregamos el usuario_id al final del arreglo
+        const result = await pool.query(query, [nombre_completo, email, telefono, nivel_lealtad, usuario_id]);
+        
         res.status(201).json({ status: 'success', message: 'Cliente registrado', data: result.rows[0] });
     } catch (error) {
         if (error.code === '23505') return res.status(409).json({ status: 'error', message: 'Este correo ya está registrado' });

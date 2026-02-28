@@ -85,18 +85,23 @@ const realizarVenta = async (req, res) => {
                 [venta_id, pago.metodo_pago, pago.monto]
             );
         }
-
-        // --- FASE 6: DESCONTAR PIEZAS Y REGISTRAR MOVIMIENTOS ---
+// --- FASE 6: DESCONTAR PIEZAS Y REGISTRAR MOVIMIENTOS ---
         for (let art of articulos) {
-            const prodRes = await client.query('SELECT precio_venta FROM productos WHERE id = $1', [art.producto_id]);
+            const prodRes = await client.query('SELECT precio_venta, stock_actual FROM productos WHERE id = $1', [art.producto_id]);
             const precio = prodRes.rows[0].precio_venta;
+            const stockViejo = prodRes.rows[0].stock_actual;
+            const stockNuevo = stockViejo - art.cantidad; // Calculamos en cuánto va a quedar
 
+            // ⚠️ AQUÍ ESTÁ LA LÍNEA QUE FALTABA: Guardar qué producto se vendió en el ticket
             await client.query(
-                'INSERT INTO ventas_detalles (venta_id, producto_id, cantidad, precio_unitario) VALUES ($1, $2, $3, $4)',
-                [venta_id, art.producto_id, art.cantidad, precio]
+                'INSERT INTO ventas_detalles (venta_id, producto_id, cantidad, precio_unitario, actualizado_por) VALUES ($1, $2, $3, $4, $5)',
+                [venta_id, art.producto_id, art.cantidad, precio, usuario_id]
             );
 
-            await client.query('UPDATE productos SET stock_actual = stock_actual - $1 WHERE id = $2', [art.cantidad, art.producto_id]);
+            // Actualizamos el stock global
+            await client.query('UPDATE productos SET stock_actual = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [stockNuevo, art.producto_id]);
+            
+            // Actualizamos la bodega física
             await client.query('UPDATE inventario_fisico SET cantidad = cantidad - $1 WHERE producto_id = $2 AND ubicacion_id = $3', [art.cantidad, art.producto_id, art.ubicacion_id]);
             
             await client.query(
@@ -104,6 +109,13 @@ const realizarVenta = async (req, res) => {
                  VALUES ($1, $2, $3, $4, 'SALIDA', 'Venta generada - Ticket ID: ' || $5)`,
                 [art.producto_id, art.ubicacion_id, usuario_id, art.cantidad, venta_id]
             );
+
+            // 🚀 --- RADAR OMNICANAL (NUEVO) --- 🚀
+            // Si después de esta venta nos quedamos en CERO, disparamos la alerta de pausa
+            if (stockNuevo === 0) {
+                console.log(`\n🚨 [ALERTA OMNICANAL] El producto ${art.producto_id} se agotó.`);
+                console.log(`⏳ Preparando Webhooks para pausar publicaciones en Mercado Libre, Amazon y WooCommerce...`);
+            }
         }
 
         await client.query('COMMIT'); 
